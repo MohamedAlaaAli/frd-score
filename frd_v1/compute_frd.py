@@ -56,7 +56,7 @@ def main(
                                                          ) 
     # Frechet distance
     fd = frechet_distance(feats1, feats2)
-    frd = np.log(fd)
+    frd = np.abs(fd)
 
     print("FRD = {}".format(frd))
 
