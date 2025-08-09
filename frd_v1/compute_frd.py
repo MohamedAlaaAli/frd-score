@@ -18,7 +18,8 @@ def main(
         image_folder2,
         force_compute_fresh = False,
         interpret = False,
-        parallelize = True
+        parallelize = True,
+        comp=True
 ):
     radiomics_fname = 'radiomics.csv'
 
@@ -45,26 +46,26 @@ def main(
         print("Computed radiomics for image folder 2.")
     else:
         print("Radiomics already computed for image folder 2 at {}.".format(radiomics_path2))
+    if comp:
+        # load radiomics
+        radiomics_df1 = pd.read_csv(radiomics_path1)
+        radiomics_df2 = pd.read_csv(radiomics_path2)
 
-    # load radiomics
-    radiomics_df1 = pd.read_csv(radiomics_path1)
-    radiomics_df2 = pd.read_csv(radiomics_path2)
+        feats1, feats2 = convert_radiomic_dfs_to_vectors(radiomics_df1, 
+                                                             radiomics_df2,
+                                                             match_sample_count=True, # needed for distance measures
+                                                             ) 
+        # Frechet distance
+        fd = frechet_distance(feats1, feats2)
+        frd = np.abs(fd)
 
-    feats1, feats2 = convert_radiomic_dfs_to_vectors(radiomics_df1, 
-                                                         radiomics_df2,
-                                                         match_sample_count=True, # needed for distance measures
-                                                         ) 
-    # Frechet distance
-    fd = frechet_distance(feats1, feats2)
-    frd = np.abs(fd)
+        print("FRD = {}".format(frd))
 
-    print("FRD = {}".format(frd))
+        if interpret:
+            run_tsne = True
+            interpret_radiomic_differences(radiomics_path1, radiomics_path2, run_tsne=run_tsne)
 
-    if interpret:
-        run_tsne = True
-        interpret_radiomic_differences(radiomics_path1, radiomics_path2, run_tsne=run_tsne)
-
-    return frd
+        return frd
 
 if __name__ == "__main__":
     tstart = time()
@@ -74,14 +75,15 @@ if __name__ == "__main__":
     parser.add_argument('--image_folder2', type=str, required=True)
     parser.add_argument('--force_compute_fresh', action='store_true', help='re-compute all radiomics fresh')
     parser.add_argument('--interpret', action='store_true', help='interpret the features underlying Fréchet Radiomics Distance')
-
+    parser.add_argument('--comp', type=bool, required=False, default=False)
     args = parser.parse_args()
 
     main(
         args.image_folder1,
         args.image_folder2,
         force_compute_fresh=args.force_compute_fresh,
-        interpret=args.interpret
+        interpret=args.interpret,
+        comp=args.comp
         )
 
     tend = time()
