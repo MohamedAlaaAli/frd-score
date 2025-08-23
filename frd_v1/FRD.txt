@@ -1,0 +1,20 @@
+FRD
+
+BUSI DATASET:
+	( FGSM (epsilon = 1/255 )( img space )  vs CLean ) : 16.853
+	( FGSM (epsilon = 4/255 )(img space ) vs Clean ) : 64.351
+	shehab
+	shehab
+	shebab
+	shehab
+	
+	SIMPA (epsilon = 4/255) (img) vs clean: 
+	SIMPA (epsilon = 1/255) (img) vs clean: 
+	
+	SIMPA (epsilon = 4/255) (dct) vs clean: 7.64
+	SIMPA (epsilon = 1/255) (dct) vs clean: 7.829
+	
+	SIMPA (epsilon = 4/255) (fft) vs clean: 1.904
+	SIMPA (epsilon = 1/255) (fft) vs clean:  1.3017
+	
+	
