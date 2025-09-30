@@ -7,9 +7,82 @@ from time import time
 
 import numpy as np
 import pandas as pd
+import torch
 
 from src.radiomics_utils import convert_radiomic_dfs_to_vectors, compute_and_save_imagefolder_radiomics, compute_and_save_imagefolder_radiomics_parallel, interpret_radiomic_differences, compute_batch_radiomics
 from src.utils import frechet_distance
+
+def extract_features_from_batch(image_batch, parallelize=True, to_grayscale=True):
+    """
+    Compute radiomics feature vectors for a single image batch.
+
+    ```
+    Args:
+        image_batch: torch.Tensor or numpy.ndarray of shape (B, C, H, W)
+        parallelize: bool - whether to use parallel processing in compute_batch_radiomics
+        to_grayscale: bool - whether to convert RGB images to grayscale before feature extraction
+        
+    Returns:
+        numpy.ndarray: feature vectors of shape (B, F)
+    """
+
+    # Convert torch batch to numpy
+    if isinstance(image_batch, torch.Tensor):
+        batch_np = image_batch.detach().cpu().numpy()
+    else:
+        batch_np = image_batch
+
+    # Optionally convert to grayscale
+    if to_grayscale and batch_np.shape[1] == 3:
+        batch_np = 0.299 * batch_np[:, 0] + 0.587 * batch_np[:, 1] + 0.114 * batch_np[:, 2]
+        batch_np = batch_np[:, np.newaxis, :, :]  # restore channel dimension
+
+    # Compute radiomics
+    radiomics_df = compute_batch_radiomics(batch_np, parallelize=parallelize)
+
+    # Convert dataframe to feature vectors
+    features, _ = convert_radiomic_dfs_to_vectors(radiomics_df, radiomics_df, match_sample_count=True)
+
+    return features
+
+def get_distance_fn(image_batch, parallelize=True, to_grayscale=True):
+
+    batch_features = extract_features_from_batch(image_batch, parallelize, to_grayscale)
+
+    def distance_fn(image):
+
+        try:
+            import torch
+        except ImportError:
+            print("Warning: torch not available. Please install torch for batch processing.")
+            torch = None
+        
+        batch1_np = None
+
+        # Convert torch batches to numpy and ensure they're grayscale
+        if torch is not None and isinstance(image, torch.Tensor):
+            batch1_np = image.detach().cpu().numpy()
+        else:
+            batch1_np = image
+
+        # Convert to grayscale if needed (assume RGB input)
+        if to_grayscale and batch1_np.shape[1] == 3:  # RGB
+            # Convert RGB to grayscale using standard weights
+            batch1_np = 0.299 * batch1_np[:, 0] + 0.587 * batch1_np[:, 1] + 0.114 * batch1_np[:, 2]
+            batch1_np = batch1_np[:, np.newaxis, :, :]  # Add channel dimension back
+        
+        # Compute radiomics
+        radiomics_df = compute_batch_radiomics(batch1_np, parallelize=parallelize)
+
+        # Convert dataframe to feature vectors
+        features, _ = convert_radiomic_dfs_to_vectors(radiomics_df, radiomics_df, match_sample_count=True)
+
+        fd = frechet_distance(batch_features, features, means_only = True)
+        frd = np.abs(fd)
+
+        return frd
+    
+    return distance_fn
 
 def main(
         image_batch1,
@@ -35,20 +108,13 @@ def main(
         float: FRD value if comp=True, else None
     """
     
-    # Import torch here to avoid import errors when not using batch mode
-    try:
-        import torch
-    except ImportError:
-        print("Warning: torch not available. Please install torch for batch processing.")
-        torch = None
-    
     # Convert torch batches to numpy and ensure they're grayscale
-    if torch is not None and isinstance(image_batch1, torch.Tensor):
+    if isinstance(image_batch1, torch.Tensor):
         batch1_np = image_batch1.detach().cpu().numpy()
     else:
         batch1_np = image_batch1
         
-    if torch is not None and isinstance(image_batch2, torch.Tensor):
+    if isinstance(image_batch2, torch.Tensor):
         batch2_np = image_batch2.detach().cpu().numpy()
     else:
         batch2_np = image_batch2
