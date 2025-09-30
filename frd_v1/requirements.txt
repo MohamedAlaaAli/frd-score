@@ -8,5 +8,8 @@ matplotlib
 multiprocess
 seaborn
 SimpleITK
+torch_dct
+scipy
+transformers
 # Install PyRadiomics from GitHub main branch
 git+https://github.com/Radiomics/pyradiomics.git@master#egg=pyradiomics
