@@ -9,9 +9,14 @@ import seaborn as sns
 def frechet_distance(feats1, feats2, eps=1e-6, means_only=False):
     # feats1 and feats2 are N1 x M and N2 x M matrices
     m1 = np.mean(feats1, axis=0)
-    s1 = np.cov(feats1, rowvar=False)
+    
+    s1, s2 = None, None
+
+    if not means_only:
+        s1 = np.cov(feats1, rowvar=False)
+        s2 = np.cov(feats2, rowvar=False)
+    
     m2 = np.mean(feats2, axis=0)
-    s2 = np.cov(feats2, rowvar=False)
 
     mu1 = np.atleast_1d(m1)
     mu2 = np.atleast_1d(m2)

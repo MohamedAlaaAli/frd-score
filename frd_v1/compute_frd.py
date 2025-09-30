@@ -7,13 +7,105 @@ from time import time
 
 import numpy as np
 import pandas as pd
-#import matplotlib.pyplot as plt
 
-from src.radiomics_utils import convert_radiomic_dfs_to_vectors, compute_and_save_imagefolder_radiomics, compute_and_save_imagefolder_radiomics_parallel, interpret_radiomic_differences
+from src.radiomics_utils import convert_radiomic_dfs_to_vectors, compute_and_save_imagefolder_radiomics, compute_and_save_imagefolder_radiomics_parallel, interpret_radiomic_differences, compute_batch_radiomics
 from src.utils import frechet_distance
 
-
 def main(
+        image_batch1,
+        image_batch2,
+        force_compute_fresh = False,
+        interpret = False,
+        parallelize = True,
+        comp=True,
+        means_only=False
+):
+    """
+    Compute FRD between two torch image batches.
+    
+    Args:
+        image_batch1: torch.Tensor of shape (B, C, H, W) - first batch of images
+        image_batch2: torch.Tensor of shape (B, C, H, W) - second batch of images
+        force_compute_fresh: bool - not used in batch mode
+        interpret: bool - whether to generate interpretability plots
+        parallelize: bool - whether to use parallel processing
+        comp: bool - whether to compute the actual FRD value
+        
+    Returns:
+        float: FRD value if comp=True, else None
+    """
+    
+    # Import torch here to avoid import errors when not using batch mode
+    try:
+        import torch
+    except ImportError:
+        print("Warning: torch not available. Please install torch for batch processing.")
+        torch = None
+    
+    # Convert torch batches to numpy and ensure they're grayscale
+    if torch is not None and isinstance(image_batch1, torch.Tensor):
+        batch1_np = image_batch1.detach().cpu().numpy()
+    else:
+        batch1_np = image_batch1
+        
+    if torch is not None and isinstance(image_batch2, torch.Tensor):
+        batch2_np = image_batch2.detach().cpu().numpy()
+    else:
+        batch2_np = image_batch2
+    
+    # Convert to grayscale if needed (assume RGB input)
+    if batch1_np.shape[1] == 3:  # RGB
+        # Convert RGB to grayscale using standard weights
+        batch1_np = 0.299 * batch1_np[:, 0] + 0.587 * batch1_np[:, 1] + 0.114 * batch1_np[:, 2]
+        batch1_np = batch1_np[:, np.newaxis, :, :]  # Add channel dimension back
+        
+    if batch2_np.shape[1] == 3:  # RGB
+        batch2_np = 0.299 * batch2_np[:, 0] + 0.587 * batch2_np[:, 1] + 0.114 * batch2_np[:, 2]
+        batch2_np = batch2_np[:, np.newaxis, :, :]  # Add channel dimension back
+
+    # Compute radiomics for both batches
+    print("Computing radiomics for batch 1...")
+    radiomics_df1 = compute_batch_radiomics(batch1_np, parallelize=parallelize)
+    print("Computed radiomics for batch 1.")
+    
+    print("Computing radiomics for batch 2...")
+    radiomics_df2 = compute_batch_radiomics(batch2_np, parallelize=parallelize)
+    print("Computed radiomics for batch 2.")
+
+    if comp:
+        feats1, feats2 = convert_radiomic_dfs_to_vectors(radiomics_df1, 
+                                                             radiomics_df2,
+                                                             match_sample_count=False, # needed for distance measures
+                                                             ) 
+        
+        print(feats1.shape, feats2.shape)
+
+        # Frechet distance
+        fd = frechet_distance(feats1, feats2, means_only = means_only)
+        frd = np.abs(fd)
+
+        print("FRD = {}".format(frd))
+
+        if interpret:
+            # For interpretation, we need to save temporary CSV files
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp1:
+                radiomics_df1.to_csv(tmp1.name, index=False)
+                radiomics_path1 = tmp1.name
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp2:
+                radiomics_df2.to_csv(tmp2.name, index=False)
+                radiomics_path2 = tmp2.name
+                
+            run_tsne = True
+            interpret_radiomic_differences(radiomics_path1, radiomics_path2, run_tsne=run_tsne)
+            
+            # Clean up temporary files
+            os.unlink(radiomics_path1)
+            os.unlink(radiomics_path2)
+
+        return frd
+
+def main_folders(
         image_folder1,
         image_folder2,
         force_compute_fresh = False,
@@ -21,6 +113,9 @@ def main(
         parallelize = True,
         comp=True
 ):
+    """
+    Original main function that works with image folders (for backward compatibility).
+    """
     radiomics_fname = 'radiomics.csv'
 
     radiomics_path1 = os.path.join(image_folder1, radiomics_fname)
@@ -75,10 +170,10 @@ if __name__ == "__main__":
     parser.add_argument('--image_folder2', type=str, required=True)
     parser.add_argument('--force_compute_fresh', action='store_true', help='re-compute all radiomics fresh')
     parser.add_argument('--interpret', action='store_true', help='interpret the features underlying Fréchet Radiomics Distance')
-    parser.add_argument('--comp', type=bool, required=False, default=False)
+    parser.add_argument('--comp', type=bool, required=False, default=True)
     args = parser.parse_args()
 
-    main(
+    main_folders(
         args.image_folder1,
         args.image_folder2,
         force_compute_fresh=args.force_compute_fresh,

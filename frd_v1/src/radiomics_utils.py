@@ -472,3 +472,144 @@ def interpret_radiomic_differences(
         print('{}: {:.1f}'.format(sorted_feature_names[i], np.log(y[i])))
 
     return
+
+
+def compute_batch_radiomics(
+        image_batch,
+        parallelize=True,
+        num_workers=8,
+        params_file='configs/2D_extraction.yaml'
+):
+    """
+    Compute radiomics features for a batch of images directly from numpy arrays.
+    
+    Args:
+        image_batch: numpy array of shape (B, C, H, W) or (B, H, W) - batch of images
+        parallelize: bool - whether to use parallel processing
+        num_workers: int - number of workers for parallel processing
+        params_file: str - path to radiomics parameters file
+        
+    Returns:
+        pd.DataFrame: radiomics features with img_fname column for consistency
+    """
+    import torch
+    
+    # Ensure input is numpy array and handle different input shapes
+    if isinstance(image_batch, torch.Tensor):
+        image_batch = image_batch.detach().cpu().numpy()
+    
+    # Convert to proper shape: (B, H, W) for grayscale
+    if len(image_batch.shape) == 4:  # (B, C, H, W)
+        if image_batch.shape[1] == 1:  # Grayscale with channel dim
+            image_batch = image_batch.squeeze(1)  # (B, H, W)
+        elif image_batch.shape[1] == 3:  # RGB
+            # Convert RGB to grayscale using standard weights
+            image_batch = 0.299 * image_batch[:, 0] + 0.587 * image_batch[:, 1] + 0.114 * image_batch[:, 2]
+    
+    batch_size = image_batch.shape[0]
+    
+    if parallelize and batch_size > 1:
+        return _compute_batch_radiomics_parallel(image_batch, num_workers, params_file)
+    else:
+        return _compute_batch_radiomics_sequential(image_batch, params_file)
+
+
+def _compute_batch_radiomics_sequential(image_batch, params_file):
+    """Sequential computation of radiomics for a batch."""
+    radiomics = []
+    img_filenames = []
+    
+    for img_idx in tqdm(range(image_batch.shape[0]), desc="Computing radiomics"):
+        img_slice = image_batch[img_idx].copy()
+        
+        # Ensure image is in valid range [0, 255] and uint8
+        if img_slice.dtype != np.uint8:
+            if img_slice.max() <= 1.0:  # Assume normalized [0,1]
+                img_slice = (img_slice * 255).astype(np.uint8)
+            else:  # Assume already in [0,255] range
+                img_slice = img_slice.astype(np.uint8)
+        
+        mask_slice = np.ones_like(img_slice)
+        # to prevent bug in pyradiomics
+        mask_slice[0][0] = 0
+
+        features = {}
+        try:
+            features = compute_slice_radiomics(img_slice, mask_slice, params_file)
+        except RuntimeError as e:
+            print(f"Warning: Failed to compute radiomics for image {img_idx}: {e}")
+            continue
+
+        radiomics.append(features)
+        img_filenames.append(f"batch_img_{img_idx:04d}")
+    
+    # Create DataFrame
+    radiomics_df = pd.DataFrame(radiomics)
+    radiomics_df.insert(loc=0, column='img_fname', value=img_filenames)
+    
+    return radiomics_df
+
+
+def _compute_batch_radiomics_parallel(image_batch, num_workers, params_file):
+    """Parallel computation of radiomics for a batch."""
+    batch_size = image_batch.shape[0]
+    
+    def compute_radiomics_subset(subset_data):
+        """Compute radiomics for a subset of images."""
+        start_idx, img_subset = subset_data
+        radiomics = []
+        img_filenames = []
+        
+        for local_idx, img_slice in enumerate(img_subset):
+            global_idx = start_idx + local_idx
+            
+            # Ensure image is in valid range [0, 255] and uint8
+            if img_slice.dtype != np.uint8:
+                if img_slice.max() <= 1.0:  # Assume normalized [0,1]
+                    img_slice = (img_slice * 255).astype(np.uint8)
+                else:  # Assume already in [0,255] range
+                    img_slice = img_slice.astype(np.uint8)
+            
+            mask_slice = np.ones_like(img_slice)
+            # to prevent bug in pyradiomics
+            mask_slice[0][0] = 0
+
+            features = {}
+            try:
+                features = compute_slice_radiomics(img_slice, mask_slice, params_file)
+            except RuntimeError as e:
+                print(f"Warning: Failed to compute radiomics for image {global_idx}: {e}")
+                continue
+
+            radiomics.append(features)
+            img_filenames.append(f"batch_img_{global_idx:04d}")
+        
+        return radiomics, img_filenames
+
+    # Split batch into chunks for parallel processing
+    chunk_size = max(1, batch_size // num_workers)
+    data_chunks = []
+    
+    for i in range(0, batch_size, chunk_size):
+        end_idx = min(i + chunk_size, batch_size)
+        chunk = image_batch[i:end_idx]
+        data_chunks.append((i, chunk))
+    
+    # Process in parallel
+    pool = Pool(processes=min(num_workers, len(data_chunks)))
+    results = pool.map(compute_radiomics_subset, data_chunks)
+    pool.close()
+    pool.join()
+    
+    # Combine results
+    all_radiomics = []
+    all_filenames = []
+    for radiomics_list, filename_list in results:
+        all_radiomics.extend(radiomics_list)
+        all_filenames.extend(filename_list)
+    
+    # Create DataFrame
+    radiomics_df = pd.DataFrame(all_radiomics)
+    radiomics_df.insert(loc=0, column='img_fname', value=all_filenames)
+    
+    return radiomics_df
