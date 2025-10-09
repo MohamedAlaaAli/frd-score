@@ -250,9 +250,9 @@ def fgsm_kl_attack_dct(model, x_with_path, epsilon, out_folder_root=None, attack
         x_adv_pixel = torch.clamp(idct_2d(x_adv), 0.0, 1.0).detach()
 
     if out_folder is not None:
-        save_adv_batch(batch=x_adv_pixel, pth=pth, out_dir=out_folder)
+        save_adv_batch(x_adv_pixel, pth, out_folder)
     else:
-        save_adv_batch(batch=x_adv_pixel, pth=pth)
+        save_adv_batch(x_adv_pixel, pth)
 
     return x_adv_pixel
 
@@ -295,9 +295,9 @@ def fgsm_kl_attack_fourier(model, x_with_path, epsilon, out_folder_root=None, at
         x_adv_pixel = torch.clamp(x_adv_pixel, 0.0, 1.0).detach()
 
     if out_folder is not None:
-        save_adv_batch(batch=x_adv_pixel, pth=pth, out_dir=out_folder)
+        save_adv_batch(x_adv_pixel, pth, out_folder)
     else:
-        save_adv_batch(batch=x_adv_pixel, pth=pth)
+        save_adv_batch(x_adv_pixel, pth)
 
     return x_adv_pixel
 
