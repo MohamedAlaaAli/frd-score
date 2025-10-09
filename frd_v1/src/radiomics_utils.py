@@ -185,7 +185,7 @@ def compute_and_save_imagefolder_radiomics(
 
     # pyradiomics usage with numpy following https://github.com/AIM-Harvard/pyradiomics/issues/449
     # assume 2D images here
-    for img_idx, img_fname in tqdm(enumerate(img_fnames), total=len(img_fnames)):
+    for img_idx, img_fname in enumerate(img_fnames):
         #if img_idx > 10:
         #    break
 
@@ -238,7 +238,7 @@ def compute_and_save_imagefolder_radiomics_parallel(
 
         # pyradiomics usage with numpy following https://github.com/AIM-Harvard/pyradiomics/issues/449
         # assume 2D images here
-        for img_idx, img_fname in enumerate(tqdm(img_list, total=len(img_list))):
+        for img_idx, img_fname in enumerate(img_list):
             #if img_idx > 5:
             #    break
             if not img_fname.split('.')[-1] in ['png', 'jpeg', 'jpg']:
@@ -519,7 +519,7 @@ def _compute_batch_radiomics_sequential(image_batch, params_file):
     radiomics = []
     img_filenames = []
     
-    for img_idx in tqdm(range(image_batch.shape[0]), desc="Computing radiomics"):
+    for img_idx in range(image_batch.shape[0]):
         img_slice = image_batch[img_idx].copy()
         
         # Ensure image is in valid range [0, 255] and uint8

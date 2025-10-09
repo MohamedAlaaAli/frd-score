@@ -20,7 +20,6 @@ def frechet_distance(feats1, feats2, eps=1e-6, means_only=False):
 
     mu1 = np.atleast_1d(m1)
     mu2 = np.atleast_1d(m2)
-
     sigma1 = np.atleast_2d(s1)
     sigma2 = np.atleast_2d(s2)
 

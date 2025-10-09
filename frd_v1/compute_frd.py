@@ -45,41 +45,118 @@ def extract_features_from_batch(image_batch, parallelize=True, to_grayscale=True
 
     return features
 
-def get_distance_fn(image_batch, parallelize=True, to_grayscale=True):
+# def get_distance_fn(image_batch, parallelize=True, to_grayscale=True):
 
-    batch_features = extract_features_from_batch(image_batch, parallelize, to_grayscale)
+#     batch_features = extract_features_from_batch(image_batch, parallelize, to_grayscale)
+
+#     def distance_fn(image):
+
+#         try:
+#             import torch
+#         except ImportError:
+#             print("Warning: torch not available. Please install torch for batch processing.")
+#             torch = None
+        
+#         batch1_np = None
+
+#         # Convert torch batches to numpy and ensure they're grayscale
+#         if torch is not None and isinstance(image, torch.Tensor):
+#             batch1_np = image.detach().cpu().numpy()
+#         else:
+#             batch1_np = image
+
+#         # Convert to grayscale if needed (assume RGB input)
+#         if to_grayscale and batch1_np.shape[1] == 3:  # RGB
+#             # Convert RGB to grayscale using standard weights
+#             batch1_np = 0.299 * batch1_np[:, 0] + 0.587 * batch1_np[:, 1] + 0.114 * batch1_np[:, 2]
+#             batch1_np = batch1_np[:, np.newaxis, :, :]  # Add channel dimension back
+        
+#         # Compute radiomics
+#         radiomics_df = compute_batch_radiomics(batch1_np, parallelize=parallelize)
+
+#         # Convert dataframe to feature vectors
+#         features, _ = convert_radiomic_dfs_to_vectors(radiomics_df, radiomics_df, match_sample_count=True)
+
+#         fd = frechet_distance(batch_features, features, means_only = True)
+#         frd = np.abs(fd)
+
+#         return frd
+    
+#     return distance_fn
+
+
+def get_distance_fn(image_batch, parallelize=True, to_grayscale=False):
+    """
+    Factory function to create a callable for FRD between a single RGB image and a precomputed reference batch.
+    
+    Args:
+        image_batch: torch.Tensor or np.ndarray of shape (B, C, H, W) - reference batch (e.g., 12 RGB images).
+        parallelize: bool - Use parallel processing for radiomics.
+        to_grayscale: bool - Convert RGB to grayscale for radiomics (recommended).
+    
+    Returns:
+        distance_fn: Callable that takes a single image (shape (C, H, W) or (1, C, H, W)) and returns FRD float.
+    """
+    # Compute radiomics for reference batch
+    batch_radiomics_df = compute_batch_radiomics(
+        image_batch.detach().cpu().numpy() if isinstance(image_batch, torch.Tensor) else image_batch,
+        parallelize=parallelize
+    )
+    
+    # Convert to features and get feature names
+    batch_features, _, feature_names = convert_radiomic_dfs_to_vectors(
+        batch_radiomics_df, batch_radiomics_df, match_sample_count=True, return_feature_names=True, normalize=False
+    )
+    
+    # Remove NaN/inf features from batch_features
+    valid_feature_mask = ~np.isnan(batch_features).any(axis=0) & ~np.isinf(batch_features).any(axis=0)
+    batch_features = batch_features[:, valid_feature_mask]
+    valid_feature_names = feature_names[valid_feature_mask]
+    
+    # Normalize batch_features
+    mean = np.mean(batch_features, axis=0)
+    std = np.std(batch_features, axis=0) + 1e-6  # Avoid division by zero
+    batch_features = (batch_features - mean) / std
 
     def distance_fn(image):
-
-        try:
-            import torch
-        except ImportError:
-            print("Warning: torch not available. Please install torch for batch processing.")
-            torch = None
-        
-        batch1_np = None
-
-        # Convert torch batches to numpy and ensure they're grayscale
-        if torch is not None and isinstance(image, torch.Tensor):
+        # Convert to numpy if tensor
+        if isinstance(image, torch.Tensor):
             batch1_np = image.detach().cpu().numpy()
         else:
-            batch1_np = image
-
-        # Convert to grayscale if needed (assume RGB input)
-        if to_grayscale and batch1_np.shape[1] == 3:  # RGB
-            # Convert RGB to grayscale using standard weights
-            batch1_np = 0.299 * batch1_np[:, 0] + 0.587 * batch1_np[:, 1] + 0.114 * batch1_np[:, 2]
-            batch1_np = batch1_np[:, np.newaxis, :, :]  # Add channel dimension back
+            batch1_np = np.asarray(image)
         
-        # Compute radiomics
+        # Ensure batch dimension: (1, C, H, W)
+        if batch1_np.ndim == 3:  # (C, H, W)
+            batch1_np = batch1_np[np.newaxis, :, :, :]  # Add batch dim
+        
+        # Convert to grayscale if needed (for RGB input)
+        if to_grayscale and batch1_np.shape[1] == 3:  # RGB
+            batch1_np = 0.299 * batch1_np[:, 0] + 0.587 * batch1_np[:, 1] + 0.114 * batch1_np[:, 2]
+            batch1_np = batch1_np[:, np.newaxis, :, :]  # (1, 1, H, W)
+        
+        # Compute radiomics for the single image
         radiomics_df = compute_batch_radiomics(batch1_np, parallelize=parallelize)
-
-        # Convert dataframe to feature vectors
-        features, _ = convert_radiomic_dfs_to_vectors(radiomics_df, radiomics_df, match_sample_count=True)
-
-        fd = frechet_distance(batch_features, features, means_only = True)
+        
+        # Align features to reference batch's valid feature names
+        # Select only the valid feature names from radiomics_df
+        radiomics_df = radiomics_df[['img_fname'] + [col for col in radiomics_df.columns if col in valid_feature_names]]
+        
+        # Convert to features
+        features, _ = convert_radiomic_dfs_to_vectors(
+            radiomics_df, radiomics_df, match_sample_count=True, normalize=False
+        )
+        
+        # Ensure features have the same order as valid_feature_names
+        feature_indices = [radiomics_df.columns.get_loc(col) - 1 for col in valid_feature_names]  # -1 for img_fname
+        features = features[:, feature_indices]
+        
+        # Normalize features using reference batch stats
+        features = (features - mean) / std
+        
+        # Compute FRD (squared L2 distance on means)
+        fd = frechet_distance(batch_features, features, means_only=True)
         frd = np.abs(fd)
-
+        
         return frd
     
     return distance_fn
